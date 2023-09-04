@@ -1,12 +1,9 @@
-// Copyright 2013 The Flutter Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
-
-// ignore_for_file: public_member_api_docs
-
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:flutter_native_splash/flutter_native_splash.dart';
+import 'package:network_info_plus/network_info_plus.dart';
+import 'dart:developer' as developer;
+import 'dart:io';
 
 void main() {
   WidgetsBinding widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
@@ -15,7 +12,7 @@ void main() {
 }
 
 class WebViewExample extends StatefulWidget {
-  const WebViewExample({super.key});
+  const WebViewExample({Key? key}) : super(key: key);
 
   @override
   State<WebViewExample> createState() => _WebViewExampleState();
@@ -23,49 +20,85 @@ class WebViewExample extends StatefulWidget {
 
 class _WebViewExampleState extends State<WebViewExample> {
   late final WebViewController controller;
+  String _connectionStatus = 'http://example.com';
+  final NetworkInfo _networkInfo = NetworkInfo();
 
   @override
   void initState() {
     super.initState();
+    _initNetworkInfo();
     initialization();
 
-    // #docregion webview_controller
     controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(const Color(0x00000000))
       ..setNavigationDelegate(
         NavigationDelegate(
-          onProgress: (int progress) {
-            // Update loading bar.
-          },
+          onProgress: (int progress) {},
           onPageStarted: (String url) {},
           onPageFinished: (String url) {},
           onWebResourceError: (WebResourceError error) {},
           onNavigationRequest: (NavigationRequest request) {
-            if (request.url.startsWith('http://192.168.15.6:18086')) {
+            if (request.url.startsWith(_connectionStatus)) {
               return NavigationDecision.prevent;
             }
             return NavigationDecision.navigate;
           },
         ),
-      )
-      ..loadRequest(Uri.parse('http://192.168.15.6:18086'));
-    // #enddocregion webview_controller
+      );
+    //..loadRequest(Uri.parse(_connectionStatus));
   }
 
   void initialization() async {
     await Future.delayed(const Duration(seconds: 5));
-
     FlutterNativeSplash.remove();
   }
 
-  // #docregion webview_widget
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      //appBar: AppBar(title: const Text('Flutter Simple Example')),
       body: WebViewWidget(controller: controller),
     );
   }
-  // #enddocregion webview_widget
+
+  Future<void> _initNetworkInfo() async {
+    String? wifiIPv4;
+    try {
+      wifiIPv4 = await _networkInfo.getWifiIP();
+      if (wifiIPv4 != null) {
+        await testConnection(wifiIPv4, 18086);
+      }
+    } catch (e) {
+      developer.log('Failed to get WiFi IPv4', error: e);
+      wifiIPv4 = 'Failed to get WiFi IPv4';
+    }
+    // setState(() {
+    //   _connectionStatus = '$wifiIPv4';
+    // });
+  }
+
+  testConnection(String ipAddress, int port) async {
+    bool isConnected = false;
+
+    try {
+      List<String> parts = ipAddress.split('.');
+      for (int i = 1; i <= 255 && !isConnected; i++) {
+        String newIP = "${parts[0]}.${parts[1]}.${parts[2]}.$i";
+        try {
+          final socket = await Socket.connect(newIP, port,
+              timeout: const Duration(seconds: 2));
+          setState(() {
+            _connectionStatus = 'http://$newIP:$port';
+          });
+          socket.close();
+          isConnected = true;
+          controller.loadRequest(Uri.parse(_connectionStatus));
+        } catch (e) {
+          print("Connection failed to $newIP on port $port: $e");
+        }
+      }
+    } catch (e) {
+      print("Error: $e");
+    }
+  }
 }
